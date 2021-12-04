@@ -1,0 +1,12 @@
+Debug/
+x64/
+__IGNORE__*
+*.opensdf
+*.sdf
+*.suo
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+.vs/*
+!Lib/*.lib
+
