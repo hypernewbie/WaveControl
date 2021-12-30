@@ -26,7 +26,7 @@
 
 TEST_CASE( "Simple GPX Route Load", "[WaveGPX]" )
 {
-	WaveRouteState WRS;
+	WaveGPX WRS;
 	FWaveGPXRoute Route;
 	WRS.LoadRouteGPX( Route, "TestFiles/HawkHill.gpx" );
 	REQUIRE( Route.Name.size() > 0 );
@@ -36,7 +36,7 @@ TEST_CASE( "Simple GPX Route Load", "[WaveGPX]" )
 
 TEST_CASE( "Route Find Point At Dist", "[WaveGPX]" )
 {
-	WaveRouteState WRS;
+	WaveGPX WRS;
 	FWaveGPXRoute Route;
 	WRS.LoadRouteGPX( Route, "TestFiles/HawkHill.gpx" );
 
@@ -56,7 +56,7 @@ TEST_CASE( "Route Find Point At Dist", "[WaveGPX]" )
 
 TEST_CASE( "Route Get Point At Dist", "[WaveGPX]" )
 {
-	WaveRouteState WRS;
+	WaveGPX WRS;
 	FWaveGPXRoute Route;
 	WRS.LoadRouteGPX( Route, "TestFiles/HawkHill.gpx" );
 
@@ -70,6 +70,25 @@ TEST_CASE( "Route Get Point At Dist", "[WaveGPX]" )
 		auto I = WaveRouteUtil_FindPointAtDist( Route, x );
 		WAVECONTROL_LOG( "Route[%.2f] Idx[%d] = LLA { %.2f %.2f %.2f }, Grade %.1f%%\n\n", x, I, P.Lat, P.Lon, P.Alt, G );
 	}
+}
+
+TEST_CASE( "Recording", "[WaveGPX]" )
+{
+	WaveGPX WRS;
+
+	FWaveGPXRoute Route;
+	WRS.LoadRouteGPX( Route, "TestFiles/HawkHill.gpx" );
+
+	REQUIRE( Route.Name.size() > 0 );
+	REQUIRE( Route.Points.size() > 0 );
+	REQUIRE( Route.SourceFile.size() > 0 );
+
+	FWaveGPXRecord Record;
+	WRS.RecordStart( Record, Route );
+	for ( int i = 0; i < Route.Points.size(); i ++ ) {
+		WRS.RecordAddPoint( Record, Route.Points[i], std::chrono::system_clock::now(), 123.0f, 64.0f, 132.0f );
+	}
+	WRS.RecordFinish( Record, "TestFiles/HawkHill_RecordedRide.gpx" );
 }
 
 TEST_CASE( "Basic Simulation", "[WaveSim]" )

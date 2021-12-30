@@ -67,3 +67,15 @@ void WaveSimulation::Update( float DeltaTime )
 	}
 	// WAVECONTROL_LOG( "Dist: %.1f M Speed: %.1f ( %.1f MPH )\n", this->Position, this->Velocity * 3.6f, this->Velocity * 2.23694 );
 }
+
+int WaveSimulation::GetPowerZone()
+{
+	if ( this->RiderFTP <= 0.00001f ) return 1;
+	float Percentage = this->RiderPower * 100.0f / this->RiderFTP;
+	if ( Percentage < 55.0f ) return 1;
+	if ( Percentage < 75.0f ) return 2;
+	if ( Percentage < 90.0f ) return 3;
+	if ( Percentage < 105.0f ) return 4;
+	if ( Percentage < 120.0f ) return 5;
+	return 6;
+}

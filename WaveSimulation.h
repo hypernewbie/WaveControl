@@ -20,6 +20,7 @@
 #pragma once
 
 #define WAVESIM_SUBSTEPS 8
+#define WAVESIM_MAGIC_ID 0x00670233
 
 // Some useful tyre values to plug in.
 #define WAVESIM_TIRE_CRR_EXAMPLE_ROAD_FAST			0.00267f
@@ -42,7 +43,7 @@
 #define WAVESIM_DRAG_MTB 0.8f
 #define WAVESIM_DRAG_UPRIGHT 1.1f
 
-// Simply into a 2D model, since this seems to be the most robust solution to modelling cycling.
+// Simplify into a 2D model, since this seems to be the most robust solution to modelling cycling.
 // We can add hacks to make cornering look and feel more realistic.
 //
 class WaveSimulation
@@ -53,16 +54,18 @@ class WaveSimulation
 	float Position = 0.0f;
 
 public:
-	// These are inputs.
+	// These are inputs. Sync this with WaveControlDLLImport.h!
 	float RiderPower = 170.0f; // Watts
 	float RiderWeight = 83.0f; // KG
-	float BikeWeight = 9.0f; // KG
+	float BikeWeight = 9.08f + 0.34f; // KG
 	float TireCrr = WAVESIM_TIRE_CRR_EXAMPLE_ROAD_SLOW; // KG
 	float BikeDragCoeff = WAVESIM_DRAG_ROAD; // KG
 	float RiderFrontalArea = WAVESIM_RIDER_FRONTALAREA_HOODS; // KG
 	float Grade = 0.0f; // Percent
 	float Altitude = 100.0f; // M
 	float DrivetrainEfficiency = 0.95f;
+	float RiderFTP = 170.0f; // Unused for simulation but ay be useful to UI.
+	uint32_t MagicID = WAVESIM_MAGIC_ID;
 
 protected:
 	void UpdateSubstep( float DeltaTime );
@@ -76,7 +79,7 @@ public:
 		return this->Position;
 	}
 
-	// In m
+	// In miles
 	inline float GetPositionMiles()
 	{
 		return this->Position * 0.000621371f;
@@ -88,7 +91,7 @@ public:
 		return this->Velocity;
 	}
 
-	// In m / s.
+	// In miles / hr.
 	inline float GetSpeedMPH()
 	{
 		return this->Velocity * 2.23694f;
@@ -100,4 +103,6 @@ public:
 		this->Velocity = 0.0f;
 		this->Position = 0.0f;
 	}
+
+	int GetPowerZone();
 };

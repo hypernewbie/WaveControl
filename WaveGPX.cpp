@@ -25,12 +25,15 @@
 #include <fstream>
 #include <functional>
 #include <algorithm>
+#include <chrono>
 
 #include <gpx/GPX.h>
 #include <gpx/Parser.h>
+#include <gpx/Writer.h>
 #include <gpx/Report.h>
 #include <gpx/ReportCerr.h>
 #include <geodetic_conv.hpp>
+#include <date.h>
 
 #include <Eigen/Core>
 #include <Eigen/Eigen>
@@ -40,20 +43,23 @@ inline WVec3 WaveGPX_PointToVec(const FWaveGPXPoint& P)
 	return WVec3( P.East, P.North, P.Up );
 }
 
-static float WaveLerp( float A, float B, float t )
+static double WaveLerp( double A, float B, double t )
 {
 	return A * ( 1.0f - t ) + B * t;
 }
 
-WaveRouteState::WaveRouteState()
+WaveGPX::WaveGPX()
 {
 }
 
-WaveRouteState::~WaveRouteState()
+WaveGPX::~WaveGPX()
 {
 }
 
-bool WaveRouteState::LoadRouteGPX( FWaveGPXRoute& Route, const std::string FileName )
+#pragma optimize("", off);
+
+
+bool WaveGPX::LoadRouteGPX( FWaveGPXRoute& Route, const std::string FileName )
 {
 	std::ifstream FileStream( FileName );
 
@@ -93,10 +99,10 @@ bool WaveRouteState::LoadRouteGPX( FWaveGPXRoute& Route, const std::string FileN
 
 	// Read waypoint from the GPX file.
 
-	auto ConvertGPXDecimalToFloat = []( gpx::Decimal& Val ) -> float
+	auto ConvertGPXDecimalToDouble = []( gpx::Decimal& Val ) -> double
 	{
-		float Ret = 0.0f;
-		sscanf_s( Val.getValue().c_str(), "%f", &Ret);
+		double Ret = 0.0;
+		sscanf_s( Val.getValue().c_str(), "%lf", &Ret);
 		return Ret;
 	};
 
@@ -109,9 +115,9 @@ bool WaveRouteState::LoadRouteGPX( FWaveGPXRoute& Route, const std::string FileN
 			FWaveGPXPoint P;
 
 			// Convert string LLA to double.
-			P.Lat = ConvertGPXDecimalToFloat( Point->lat() );
-			P.Lon = ConvertGPXDecimalToFloat( Point->lon() );
-			P.Alt = ConvertGPXDecimalToFloat( Point->ele() );
+			P.Lat = ConvertGPXDecimalToDouble( Point->lat() );
+			P.Lon = ConvertGPXDecimalToDouble( Point->lon() );
+			P.Alt = ConvertGPXDecimalToDouble( Point->ele() );
 
 			// Convert LLA waypoint to ENU.
 			if ( !ReferencePointInitialised ) {
@@ -155,13 +161,14 @@ bool WaveRouteState::LoadRouteGPX( FWaveGPXRoute& Route, const std::string FileN
 	return true;
 }
 
-void WaveRouteState::CalcRouteStats( FWaveGPXRoute& Route )
+void WaveGPX::CalcRouteStats( FWaveGPXRoute& Route )
 {
 	Route.Stat_Elev = 0.0f;
 	Route.Stat_Length = 0.0f;
 	Route.Stat_HillinessRating = 0.0f;
 	Route.Stat_DifficultyScore = 0.0f;
 	Route.Stat_HighestAlt = Route.Points.size() ? Route.Points[0].Alt : 0.0f;
+	Route.Stat_LowestAlt = Route.Points.size() ? Route.Points[0].Alt : 0.0f;
 
 	for ( int i = 1; i < Route.Points.size(); i++ ) {
 		auto& PrevPoint = Route.Points[ i - 1 ];
@@ -176,6 +183,7 @@ void WaveRouteState::CalcRouteStats( FWaveGPXRoute& Route )
 		Route.Stat_Length += ( float ) Dist;
 		Route.Stat_Elev += ( Elev > 0 ) ? ( float ) Elev : 0.0f;
 		Route.Stat_HighestAlt = ( CurrPoint.Alt > Route.Stat_HighestAlt ) ? CurrPoint.Alt : Route.Stat_HighestAlt;
+		Route.Stat_LowestAlt = ( CurrPoint.Alt <= Route.Stat_LowestAlt ) ? CurrPoint.Alt : Route.Stat_LowestAlt;
 	}
 	
 	// Hilliness rating is a heuristic taken from Western Wheelers club system, which I believe
@@ -191,6 +199,115 @@ void WaveRouteState::CalcRouteStats( FWaveGPXRoute& Route )
 	WAVECONTROL_LOG( "Length: %.1f KM ( %.1f Miles )\n" , Route.Stat_Length / 1000.0f, LengthMiles );
 	WAVECONTROL_LOG( "Elevation: %.1f M ( %.1f Feet )\n" , Route.Stat_Elev, ElevFeet );
 	WAVECONTROL_LOG( "Hilliness Rating: %.1f\n" , Route.Stat_HillinessRating );
+}
+
+void WaveGPX::RecordStart( FWaveGPXRecord& Record, const FWaveGPXRoute& SrcInfo )
+{
+	auto TimeNow = std::time( 0 );
+
+	static char TempStr[1024];
+	ctime_s( TempStr, 1024, &TimeNow );
+
+	Record.Route = FWaveGPXRoute();
+	Record.Route.Name = SrcInfo.Name;
+	Record.Route.Author = "CYCLEWAVE - Virtual Cycling Route Simulation App";
+	Record.Route.Description = std::string( "Virtual ride at " ) + TempStr;
+	Record.Route.SourceFile = "";
+
+	Record.Time.clear();
+	Record.Power.clear();
+	Record.Cadence.clear();
+	Record.HR.clear();
+}
+
+void WaveGPX::RecordAddPoint( FWaveGPXRecord& Record, FWaveGPXPoint Point, std::chrono::system_clock::time_point Time, float Power, float Cadence, float HR )
+{
+	assert( Record.Route.Points.size() == Record.Time.size() );
+	assert( Record.Route.Points.size() == Record.Power.size() );
+	assert( Record.Route.Points.size() == Record.Cadence.size() );
+	assert( Record.Route.Points.size() == Record.HR.size() );
+
+	Record.Route.Points.push_back( Point );
+	Record.Time.push_back( Time );
+	Record.Power.push_back( Power );
+	Record.Cadence.push_back( Cadence );
+	Record.HR.push_back( HR );
+}
+
+bool WaveGPX::RecordFinish( FWaveGPXRecord& Record, const std::string FileName )
+{
+	// Final checks before export.
+
+	assert( Record.Route.Points.size() == Record.Time.size() );
+	assert( Record.Route.Points.size() == Record.Power.size() );
+	assert( Record.Route.Points.size() == Record.Cadence.size() );
+	assert( Record.Route.Points.size() == Record.HR.size() );
+	Record.Route.SourceFile = FileName;
+
+	// Calculate finals stats.
+	WaveGPX::CalcRouteStats( Record.Route );
+
+	// Create GPX objects.
+	auto GPXRoot = std::make_unique< gpx::GPX >();
+	GPXRoot->metadata().add();
+
+	GPXRoot->version().add()->setValue( "1.1" );
+	GPXRoot->metadata().name().add()->setValue( Record.Route.Name );
+	GPXRoot->metadata().desc().add()->setValue( Record.Route.Description );
+	GPXRoot->metadata().author().add()->setValue( Record.Route.Author );
+	GPXRoot->creator().add()->setValue("CYCLEWAVE");
+	GPXRoot->add( "xmlns",gpx::Node::ATTRIBUTE )->setValue( "http://www.topografix.com/GPX/1/1" );
+
+	// Add GPX track.
+	auto GPXTrk = dynamic_cast< gpx::TRK* >( GPXRoot->trks().add() );
+	GPXTrk->name().add()->setValue( Record.Route.Name );
+	auto GPXTrkseg = dynamic_cast< gpx::TRKSeg* >( GPXTrk->trksegs().add() );
+	
+	for ( int i = 0; i < Record.Route.Points.size(); i++ ) {
+		static char TempStr[ 1024 ];
+		auto GPXTrkpt = dynamic_cast< gpx::WPT* >( GPXTrkseg->trkpts().add() );
+
+		// Add the LLA point.
+		snprintf( TempStr, 1024, "%lf", Record.Route.Points[i].Lat );
+		GPXTrkpt->lat().add()->setValue( TempStr );
+		snprintf( TempStr, 1024, "%lf", Record.Route.Points[i].Lon );
+		GPXTrkpt->lon().add()->setValue( TempStr );
+		snprintf( TempStr, 1024, "%lf", Record.Route.Points[i].Alt );
+		GPXTrkpt->ele().add()->setValue( TempStr );
+		
+		// Add the time point.
+		// ref: https://stackoverflow.com/questions/27543258/how-to-convert-a-timezoned-xml-type-datetime-to-time-t-with-c
+		{
+			auto XMLFormattedDateTime = date::format( "%Y-%m-%dT%TZ", Record.Time[i] );
+			GPXTrkpt->time().add()->setValue( XMLFormattedDateTime );
+		}
+
+		// Add extensions for HR, Cadence, Power.
+		// ref: https://developers.strava.com/docs/uploads/
+		GPXTrkpt->extensions().add();
+		if ( Record.Cadence[i] >= 0.0f ) {
+			snprintf( TempStr, 1024, "%d", ( int ) Record.Cadence[i] );
+			GPXTrkpt->extensions().add( "cadence", gpx::Node::ELEMENT )->setValue( TempStr );
+		}
+		if ( Record.HR[i] >= 0.0f ) {
+			snprintf( TempStr, 1024, "%d", ( int ) Record.HR[i] );
+			GPXTrkpt->extensions().add( "heartrate", gpx::Node::ELEMENT )->setValue( TempStr );
+		}
+		if ( Record.Power[i] >= 0.0f ) {
+			snprintf( TempStr, 1024, "%d", ( int ) Record.Power[i] );
+			GPXTrkpt->extensions().add( "power", gpx::Node::ELEMENT )->setValue( TempStr );
+		}
+	}
+
+	std::ofstream FileStream( FileName );
+	if ( !FileStream.is_open() ) {
+		WAVECONTROL_LOG( "ERROR: Failed to write file %s!\n", FileName.c_str() );
+		return false;
+	}
+
+	gpx::Writer GPXWriter;
+	GPXWriter.write( FileStream, GPXRoot.get(), true );
+	FileStream.close();
 }
 
 int WaveRouteUtil_FindPointAtDist( const FWaveGPXRoute& Route, float Dist )
@@ -213,8 +330,6 @@ int WaveRouteUtil_FindPointAtDist( const FWaveGPXRoute& Route, float Dist )
 	return ( Itr - Route.Points.begin() - 1 );
 }
 
-#pragma optimize("", off)
-
 FWaveGPXPoint WaveRouteUtil_FindENUPosAtDist( const FWaveGPXRoute& Route, float Dist )
 {
 	FWaveGPXPoint Point;
@@ -229,7 +344,8 @@ FWaveGPXPoint WaveRouteUtil_FindENUPosAtDist( const FWaveGPXRoute& Route, float 
 		return Point;
 	}
 	
-	if ( Index == Route.Points.size() - 1 || Dist <= Route.Points[Index].Dist ) {
+	if ( Index == Route.Points.size() - 1 || Dist < Route.Points[Index].Dist )
+	{
 		Point.East = Route.Points[Index].East;
 		Point.North = Route.Points[Index].North;
 		Point.Up = Route.Points[Index].Up;
@@ -243,8 +359,8 @@ FWaveGPXPoint WaveRouteUtil_FindENUPosAtDist( const FWaveGPXRoute& Route, float 
 	}
 
 	assert( Dist >= Route.Points[Index].Dist );
-	float InterpRun = Route.Points[Index + 1].Dist - Route.Points[Index].Dist;
-	float InterpX = ( Dist - Route.Points[Index].Dist ) / ( InterpRun > 0.01f ? InterpRun : 0.01f );
+	double InterpRun = Route.Points[Index + 1].Dist - Route.Points[Index].Dist;
+	double InterpX = ( Dist - Route.Points[Index].Dist ) / ( InterpRun > 0.01f ? InterpRun : 0.01f );
 
 	Point.Lat = WaveLerp( Route.Points[Index].Lat, Route.Points[Index + 1].Lat, InterpX );
 	Point.Lon = WaveLerp( Route.Points[Index].Lon, Route.Points[Index + 1].Lon, InterpX );
@@ -266,10 +382,27 @@ float WaveRouteUtil_FindGradePosAtDist( const FWaveGPXRoute& Route, float Dist, 
 
 	auto PosA = WaveRouteUtil_FindENUPosAtDist( Route, Dist - Smoothness );
 	auto PosB = WaveRouteUtil_FindENUPosAtDist( Route, Dist + Smoothness );
-	
-	float ElevationChange = PosB.Alt - PosA.Alt;
-	float HorizontalDistanceCovered = 2.0f * Smoothness;
-	float Grade = ElevationChange / HorizontalDistanceCovered;
+	auto HorizontalDist = sqrt( pow( PosA.East - PosB.East, 2.0 ) + pow( PosA.North - PosB.North, 2.0 ) );
+
+	double ElevationChange = PosB.Alt - PosA.Alt;
+	double HorizontalDistanceCovered = ( HorizontalDist <= 0.0001f ) ? 0.0001f : HorizontalDist;
+	double Grade = ElevationChange / HorizontalDistanceCovered;
 
 	return Grade * 100.0f;
+}
+
+void WaveRouteUtil_FillENUFromLLA( const FWaveGPXRoute& Route, FWaveGPXPoint& Point )
+{
+	// Convert ENU waypoint back to LLA.
+	geodetic_converter::GeodeticConverter GConverter;
+	GConverter.initialiseReference( Route.Points[0].Lat, Route.Points[0].Lon, Route.Points[0].Alt );
+	GConverter.geodetic2Enu( Point.Lat, Point.Lon, Point.Alt, &Point.East, &Point.North, &Point.Up );
+}
+
+void WaveRouteUtil_FillLLAFromENU( const FWaveGPXRoute& Route, FWaveGPXPoint& Point )
+{
+	// Convert ENU waypoint back to LLA.
+	geodetic_converter::GeodeticConverter GConverter;
+	GConverter.initialiseReference( Route.Points[0].Lat, Route.Points[0].Lon, Route.Points[0].Alt );
+	GConverter.enu2Geodetic( Point.East, Point.North, Point.Up, &Point.Lat, &Point.Lon, &Point.Alt );
 }

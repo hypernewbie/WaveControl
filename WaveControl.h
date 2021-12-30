@@ -32,11 +32,13 @@
 #include "WaveBackend.h"
 #include "WaveDevice.h"
 
-#define WAVECONTROL_LOG printf
+#define WAVECONTROL_LOG WaveControlLog
 #define WAVECONTROL_DEFAULT_BLUETOOTH_ADAPTER 0
+#define WAVECONTROL_MAGIC_ID 0xcd70fb4a
 
 struct WaveControlPrivateData;
 
+void WaveControlLog( const char* fmt, ... );
 void WaveControlSetLogCallback( std::function< void( const char* ) > Callback );
 
 class WaveControl
@@ -76,6 +78,7 @@ protected:
 public:
 	WaveControl();
 	virtual ~WaveControl();
+	uint32_t MagicID = WAVECONTROL_MAGIC_ID;
 
 	void ScanStart( int AutoStopFrames = INT_MAX );
 

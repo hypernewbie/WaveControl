@@ -80,237 +80,6 @@ static WaveControl_WheelSizeData FindWheelSizeData( WaveControlPrivateData& Priv
 	return Blank;
 }
 
-#if 0
-class WavePowerSensor : public WaveDeviceBase
-{
-public:
-	virtual void Update() override
-	{
-		WaveDeviceBase::Update();
-		if ( !PeripheralData.is_connected() ) {
-			return;
-		}
-
-		static const char* PS_WahooServiceUUID = "00001818-0000-1000-8000-00805f9b34fb";
-		static const char* PS_WahooExtensionUUID = "a026e005-0a7d-4ab3-97fa-f1500f9feb8b";
-
-		if ( NeedSetup ) {
-			static const char* PS_ServiceUUID = "00001818-0000-1000-8000-00805f9b34fb";
-			static const char* PS_MeasurementUUID = "00002a63-0000-1000-8000-00805f9b34fb";
-			
-			
-
-			PeripheralData.indicate(
-				PS_WahooServiceUUID,
-				PS_WahooExtensionUUID,
-				[&]( BLE_Bytes Bytes )
-				{
-					if ( Bytes.size() <= 0 )
-						return;
-					std::cout << "Received: ";
-					print_byte_array(Bytes);
-				}
-			);
-
-			PeripheralData.notify(
-				PS_ServiceUUID,
-				PS_MeasurementUUID,   
-				[&]( BLE_Bytes Bytes )
-				{
-					if ( Bytes.size() <= 0 )
-						return;
-
-					uint16_t Flags = ( reinterpret_cast< uint16_t* >( &Bytes[0] ) )[0];
-					uint16_t InstaneousPower = ( reinterpret_cast< uint16_t* >( &Bytes[2] ) )[0];
-					State->Power = ( float) InstaneousPower;
-
-					//WAVECONTROL_LOG( "Power %.2lf Watts\n", State->Power );
-				}
-			);
-
-		}
-
-		static int frameCount = 0;
-		frameCount++;
-		if (frameCount % 120 != 0)
-			return;
-
-		static bool stuff = false;
-		stuff = !stuff;
-		uint8_t value = stuff ? 0 : 255;
-		
-		//WAVECONTROL_LOG( "Changing power  %d...", value );
-
-		/*{
-			std::string test; test.resize(7);
-			test[0] = 0x43;
-			test[1] = value;
-			test[2] = value;
-			test[3] = value;
-			test[4] = value;
-			test[5] = value;
-			test[6] = value;
-			PeripheralData.write_command(
-				PS_WahooServiceUUID,
-				PS_WahooExtensionUUID,
-				test
-			);
-		}*/
-
-		/*{
-			std::string test; test.resize(7);
-			test[0] = 0x40;
-			test[1] = value;
-			test[2] = value;
-			PeripheralData.write_command(
-				PS_WahooServiceUUID,
-				PS_WahooExtensionUUID,
-				test
-			);
-		}
-
-		{
-			std::string test; test.resize(7);
-			test[0] = 0x41;
-			test[1] = value;
-			test[2] = value;
-			PeripheralData.write_command(
-				PS_WahooServiceUUID,
-				PS_WahooExtensionUUID,
-				test
-			);
-		}*/
-
-		/*PeripheralData.write_desc(
-			PS_WahooServiceUUID,
-			PS_WahooExtensionUUID,
-			0x200
-		);*/
-
-		/*{
-			std::string test; test.resize(3);
-			test[0] = 0x46;
-			test[1] = value;
-			test[2] = value;
-
-			PeripheralData.write_command(
-				PS_WahooServiceUUID,
-				PS_WahooExtensionUUID,
-				test
-			);
-		}*/
-	}
-};
-
-// ---------------------------------------------------------------------------------------------------------------------------------------------------
-
-class WaveControl
-{
-	const static int DEFAULT_ADAPTER = 0;
-
-	BLE_AdapterType BLE_Adapter;
-	std::map< std::string, WaveControlPeripheral > BLE_PeripheralsList;
-	std::map< int, std::string > BLE_CompanyIDs;
-	std::vector< WaveControl_WheelSizeData > BLE_WheelSizeData;
-
-	std::unique_ptr< WaveDeviceBase > ChosenDevices[ WAVECONTROL_DEVICE_NUM ];
-	std::shared_ptr< WaveCycleSensorReadState > SensorReadState;
-
-	std::unique_ptr< std::thread > WorkThread;
-	std::thread::id WorkThreadID;
-	std::vector< std::function< void() > > WorkThreadQueue;
-	std::mutex WorkThreadQueueMutex;
-	bool WorkerThreadExit = false;
-	bool WorkThreadScanning = false;
-	int WorkThreadScanningAutostopFrames = INT_MAX;
-
-protected:
-	WaveControl_WheelSizeData FindWheelSizeData( std::string Name )
-	{
-		for ( auto& Data : BLE_WheelSizeData ) {
-			if ( Data.FriendlyName == Name )
-				return Data;
-		}
-
-		WaveControl_WheelSizeData Blank;
-		return Blank;
-	}
-
-	
-
-public:
-	WaveControl()
-	{
-		// Initialise adapters.
-		auto AdapterList = SimpleBLE::Adapter::get_adapters();
-		this->BLE_Adapter = AdapterList[ DEFAULT_ADAPTER ];
-		this->SensorReadState = std::make_shared< WaveCycleSensorReadState >();
-
-		WaveControl_InitialiseWheelSizes( this->BLE_WheelSizeData );
-
-		// Start the worker thread.
-		this->WorkThread = std::make_unique< std::thread >( &WaveControl::WorkThread_Entry, this );
-		int ThreadScanningRemainingMS = 0;
-	}
-
-	~WaveControl()
-	{
-		this->WorkerThreadExit = true;
-		this->WorkThread->join();
-		this->WorkThread.reset( nullptr );
-
-		for( auto& Peripheral : BLE_PeripheralsList ) {
-			if ( Peripheral.second.PeripheralData.is_connected() ) {
-				printf( "Disconnecting from %s ...\n", Peripheral.second.UIName.c_str());
-				Peripheral.second.PeripheralData.disconnect();
-			}
-		}
-
-		this->SensorReadState = nullptr;
-	}
-
-	void ScanStart( int AutoStopFrames = INT_MAX )
-	{
-		WorkThread_Do( [this, AutoStopFrames](){ this->WorkThreadScanningAutostopFrames = AutoStopFrames; } );
-		WorkThread_Do( std::bind( &WaveControl::WorkerThread_ScanStart, this ) );
-	}
-
-	void ScanStop()
-	{
-		WorkThread_Do( std::bind( &WaveControl::WorkerThread_ScanStop, this ) );
-	}
-
-	void ListPeripherals()
-	{
-		WorkThread_Do(
-			[&]() {
-				for( auto& Peripheral : BLE_PeripheralsList ) {
-					printf("Peripheral ID: %s Address: %s\n", Peripheral.second.UIName.c_str(), Peripheral.second.UIAddress.c_str());
-					for (int i = 0; i < Peripheral.second.Services.size(); i++) {
-						printf("    Service: %s\n", Peripheral.second.Services[i].c_str());
-					}
-				}
-			}
-		);
-	}
-
-	void ChooseDeviceForUsage( int Usage, std::string UIAddress )
-	{
-		WorkThread_Do( std::bind( &WaveControl::WorkerThread_ChooseDeviceForUsage, this, Usage, UIAddress ) );
-	}
-
-	void ChooseWheelSize( std::string Name )
-	{
-		ChosenWheelSize = FindWheelSizeData( Name );
-	}
-
-	std::shared_ptr< WaveCycleSensorReadState > GetSensorReadState()
-	{
-		return  this->SensorReadState;
-	}
-}; 
-#endif
-
 // ---------------------------------------------------------------------- WaveControl::WorkerThread -----------------------------------------------------------------------------
 
 std::unique_ptr< WaveDeviceBase > WaveControl::MakeDeviceForUsage( int Usage )
@@ -430,6 +199,7 @@ void WaveControl::WorkThread_Entry()
 {
 	WAVECONTROL_LOG( "Workthread starting!\n" );
 	WorkThreadID = std::this_thread::get_id();
+	WaveBackend_Init( this->Backend );
 
 	while ( !this->WorkerThreadExit ) {
 		this->WorkThreadQueueMutex.lock();
@@ -462,13 +232,18 @@ WaveControl::WaveControl()
 	this->PrivateData = std::make_unique< WaveControlPrivateData >();
 	this->SensorReadState = std::make_shared< WaveCycleSensorReadState >();
 	this->SensorWriteState = std::make_shared< WaveCycleSensorWriteState >();
-	WaveBackend_Init( this->Backend );
 
 	WaveControl_InitialiseWheelSizes( this->PrivateData->WheelSizeData );
 
 	// Start the worker thread.
 	this->WorkThread = std::make_unique< std::thread >( &WaveControl::WorkThread_Entry, this );
-	int ThreadScanningRemainingMS = 0;
+
+	// Wait for backend to init from worker thread.
+	volatile bool BackendInitialised = false;
+	WorkThread_Do( [&BackendInitialised]() { BackendInitialised = true; } );
+	while ( !BackendInitialised ) {
+		std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+	}
 }
 
 WaveControl::~WaveControl()

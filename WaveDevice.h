@@ -41,15 +41,17 @@
 struct WavePeripheral;
 struct WaveControl_WheelSizeData;
 
+// Keep in sync with WaveControlDLLImport.h!
 struct WaveCycleSensorReadState
 {
 	int HR_BPM = -1;
-	bool HR_SensorContact = false;
+	char HR_SensorContact = 0;
 	float Speed = -1.0f; // Km / Hr;
 	float Cadence = -1.0f; // RPM
 	float Power = -1.0f; // Watts
 };
 
+// Keep in sync with WaveControlDLLImport.h!
 struct WaveCycleSensorWriteState
 {
 	float TotalWeight = 80.0f; // Kg
